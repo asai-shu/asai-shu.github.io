@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta name="robots" content="noindex, nofollow">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>機材・ソフトガイド</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#3b5bfd">
+<style>
+body { margin: 0; font: 15px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+       background: #f6f7f9; color: #1d2129; }
+@media (prefers-color-scheme: dark) { body { background: #111317; color: #e6e8eb; } input { background: #1b1e24; color: #e6e8eb; } }
+main { max-width: 360px; margin: 18vh auto 0; padding: 0 16px; }
+h1 { font-size: 18px; }
+input, button { display: block; width: 100%; box-sizing: border-box; margin: 8px 0; padding: 10px; font: inherit;
+                border: 1px solid #c9ced6; border-radius: 8px; }
+button { background: #2563eb; color: #fff; border: 0; }
+.muted { color: #6b7280; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <p id="status" class="muted">読み込み中…</p>
+  <form id="login" hidden>
+    <h1>ログインしてください</h1>
+    <p class="muted">このページは持ち主だけが見られます。一度ログインすると、この端末では次から自動で開きます。</p>
+    <input type="email" id="email" placeholder="メールアドレス" autocomplete="username" required>
+    <input type="password" id="password" placeholder="パスワード" autocomplete="current-password" required>
+    <button>ログイン</button>
+    <p id="err" class="muted"></p>
+  </form>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// 読み込んだページの中の変数（sb など）とぶつからないよう、全体を関数で包む
+(() => {
+const PAGE = "gear-software";
+const SUPABASE_URL = "https://jmsxajybjtvgxummvpps.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imptc3hhanlianR2Z3h1bW12cHBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0NTEwNTgsImV4cCI6MjEwODAyNzA1OH0.f1aqlFCmyexSzpA-XgltJZk_iACprpTZWjN6TugO3Dk";
+const DEVICE_KEY = "info-device-key";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: "info-auth" } });
+const $ = (id) => document.getElementById(id);
+function token() { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } }
+function setToken(t) { try { t ? localStorage.setItem(DEVICE_KEY, t) : localStorage.removeItem(DEVICE_KEY); } catch (e) {} }
+
+async function gunzip(b64) {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(stream).text();
+}
+
+async function show() {
+  const t = token();
+  if (!t) return askLogin();
+  const { data, error } = await sb.rpc("info_device_page", { p_token: t, p_name: PAGE });
+  if (error) {
+    if (/invalid device/.test(error.message)) { setToken(null); return askLogin(); }
+    $("status").textContent = "読み込めませんでした。少し待ってから開き直してください。（" + error.message + "）";
+    return;
+  }
+  if (!data || !data.length) { $("status").textContent = "まだページが作られていません。"; return; }
+  const html = await gunzip(data[0].data);
+  document.open(); document.write(html); document.close();
+}
+
+function askLogin() { $("status").hidden = true; $("login").hidden = false; }
+
+$("login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("err").textContent = "確認中…";
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+  if (error) { $("err").textContent = "ログインできませんでした：" + error.message; return; }
+  const r = await sb.rpc("info_register_device", { p_label: navigator.userAgent.slice(0, 120) });
+  if (r.error || !r.data) { $("err").textContent = "この端末を登録できませんでした：" + (r.error ? r.error.message : ""); return; }
+  setToken(r.data);
+  $("login").hidden = true; $("status").hidden = false;
+  show();
+});
+
+show();
+})();
+</script>
+</body>
+</html>
